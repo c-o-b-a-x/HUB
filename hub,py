@@ -1,0 +1,430 @@
+import tkinter as tk
+from tkinter import messagebox, ttk, filedialog
+from PIL import Image, ImageTk
+import subprocess
+import json
+import os
+import psutil
+import datetime
+import platform
+import ctypes
+from threading import Timer
+
+# File paths
+APP_FILE = "apps.json"
+SETTINGS_FILE = "settings.json"
+FAVORITES_FILE = "favorites.json"
+RECENT_FILE = "recent.json"
+USER_FILE = "users.json"
+
+# Theme Colors
+THEMES = {
+    "dark": {"bg": "#2B2B2B", "fg": "#FFFFFF", "accent": "#0ABAB5", "hover": "#096E6A"},
+    "light": {"bg": "#FFFFFF", "fg": "#000000", "accent": "#0ABAB5", "hover": "#00E5E2"},
+}
+
+# Global Variables
+current_theme = "dark"
+applications = {}
+favorites = []
+recent = []
+icon_cache = {}
+current_user = None
+users = {}
+
+# Utility Functions
+def save_settings():
+    """Save the current settings (e.g., theme) to a file."""
+    settings = {"theme": current_theme}
+    with open(SETTINGS_FILE, "w") as f:
+        json.dump(settings, f)
+
+def load_settings():
+    """Load user settings, such as theme."""
+    global current_theme
+    try:
+        with open(SETTINGS_FILE, "r") as f:
+            settings = json.load(f)
+            current_theme = settings.get("theme", "dark")
+    except (FileNotFoundError, json.JSONDecodeError):
+        current_theme = "dark"
+
+def save_apps():
+    """Save the applications list to a file."""
+    with open(APP_FILE, "w") as f:
+        json.dump(applications, f, indent=4)
+
+def load_apps():
+    """Load the applications list from a file."""
+    global applications
+    try:
+        with open(APP_FILE, "r") as f:
+            applications = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        applications = {}
+
+def save_favorites():
+    """Save the favorites list to a file."""
+    with open(FAVORITES_FILE, "w") as f:
+        json.dump(favorites, f, indent=4)
+
+def load_favorites():
+    """Load the favorites list from a file."""
+    global favorites
+    try:
+        with open(FAVORITES_FILE, "r") as f:
+            favorites = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        favorites = []
+
+def save_recent():
+    """Save the recent applications list to a file."""
+    with open(RECENT_FILE, "w") as f:
+        json.dump(recent, f, indent=4)
+
+def load_recent():
+    """Load the recent applications list from a file."""
+    global recent
+    try:
+        with open(RECENT_FILE, "r") as f:
+            recent = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        recent = []
+
+def save_users():
+    """Save the users list to a file."""
+    with open(USER_FILE, "w") as f:
+        json.dump(users, f, indent=4)
+
+def load_users():
+    """Load the users list from a file."""
+    global users
+    try:
+        with open(USER_FILE, "r") as f:
+            users = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        users = {}
+
+def authenticate_user(username, password):
+    """Authenticate user and set current_user if successful."""
+    global current_user
+    user = users.get(username)
+    if user and user["password"] == password:
+        current_user = username
+        load_user_settings()
+        load_user_apps()
+        return True
+    return False
+
+def load_user_settings():
+    """Load settings specific to the authenticated user."""
+    global current_theme
+    user_settings_file = f"{current_user}_settings.json"
+    try:
+        with open(user_settings_file, "r") as f:
+            settings = json.load(f)
+            current_theme = settings.get("theme", "dark")
+    except (FileNotFoundError, json.JSONDecodeError):
+        current_theme = "dark"
+
+def load_user_apps():
+    """Load applications specific to the authenticated user."""
+    global applications
+    user_app_file = f"{current_user}_apps.json"
+    try:
+        with open(user_app_file, "r") as f:
+            applications = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        applications = {}
+
+def save_user_settings():
+    """Save settings specific to the authenticated user."""
+    user_settings_file = f"{current_user}_settings.json"
+    settings = {"theme": current_theme}
+    with open(user_settings_file, "w") as f:
+        json.dump(settings, f)
+
+def save_user_apps():
+    """Save applications specific to the authenticated user."""
+    user_app_file = f"{current_user}_apps.json"
+    with open(user_app_file, "w") as f:
+        json.dump(applications, f, indent=4)
+
+def load_icon(path, size=(20, 20)):
+    """Load and cache an icon image."""
+    if not os.path.exists(path):
+        return None
+    if path not in icon_cache:
+        try:
+            icon = Image.open(path).resize(size, Image.ANTIALIAS)
+            icon_cache[path] = ImageTk.PhotoImage(icon)
+        except Exception:
+            return None
+    return icon_cache[path]
+
+def get_active_apps():
+    """Retrieve the list of active (foreground) apps."""
+    active_apps = []
+    for proc in psutil.process_iter(['name', 'exe']):
+        try:
+            if proc.info['exe'] and proc.info['name'] not in ("System Idle Process", "System"):
+                active_apps.append({
+                    "name": proc.info['name'],
+                    "command": proc.info['exe']
+                })
+        except (psutil.AccessDenied, psutil.NoSuchProcess):
+            continue
+    return active_apps
+
+def add_from_active_apps():
+    """Display active apps for selection and addition."""
+    active_apps = get_active_apps()
+
+    def update_app_list(query=""):
+        """Filter the active apps based on the query."""
+        for widget in app_list_frame.winfo_children():
+            widget.destroy()
+
+        filtered_apps = [app for app in active_apps if query.lower() in app["name"].lower()]
+
+        if not filtered_apps:
+            tk.Label(app_list_frame, text="No matching applications found.", bg=THEMES[current_theme]["bg"],
+                     fg=THEMES[current_theme]["fg"]).pack(pady=10)
+            return
+
+        for app in filtered_apps:
+            app_frame = tk.Frame(app_list_frame, bg=THEMES[current_theme]["bg"])
+            app_frame.pack(fill="x", pady=2)
+
+            tk.Label(app_frame, text=app["name"], bg=THEMES[current_theme]["bg"],
+                     fg=THEMES[current_theme]["fg"]).pack(side=tk.LEFT, padx=10)
+            ttk.Button(app_frame, text="Add", command=lambda a=app: select_app(a)).pack(side=tk.RIGHT, padx=10)
+
+    def select_app(app):
+        """Add the selected app to the applications list."""
+        if not app:
+            messagebox.showerror("Error", "No application selected.")
+            return
+
+        category = "Uncategorized"
+        if category not in applications:
+            applications[category] = []
+        applications[category].append(app)
+
+        save_user_apps()
+        create_buttons()
+        active_app_window.destroy()
+
+    # Active Apps Window
+    active_app_window = tk.Toplevel(root)
+    active_app_window.title("Add from Active Apps")
+    active_app_window.geometry("500x500")
+    active_app_window.configure(bg=THEMES[current_theme]["bg"])
+
+    # Search Bar
+    search_var = tk.StringVar()
+    tk.Entry(active_app_window, textvariable=search_var, font=("Arial", 12), width=40).pack(pady=10)
+    search_var.trace_add("write", lambda *args: update_app_list(search_var.get()))
+
+    # Scrollable Frame for Active Apps
+    scroll_canvas = tk.Canvas(active_app_window, bg=THEMES[current_theme]["bg"], highlightthickness=0)
+    app_list_frame = tk.Frame(scroll_canvas, bg=THEMES[current_theme]["bg"])
+    scrollbar = ttk.Scrollbar(active_app_window, orient="vertical", command=scroll_canvas.yview)
+
+    scroll_canvas.create_window((0, 0), window=app_list_frame, anchor="nw")
+    scroll_canvas.configure(yscrollcommand=scrollbar.set)
+    app_list_frame.bind("<Configure>", lambda e: scroll_canvas.configure(scrollregion=scroll_canvas.bbox("all")))
+
+    scroll_canvas.pack(side="left", fill="both", expand=True, padx=10)
+    scrollbar.pack(side="right", fill="y")
+
+    update_app_list()  # Initial list of apps
+
+# Favorites Management
+def add_to_favorites(app):
+    """Add the selected app to the favorites list."""
+    if app not in favorites:
+        favorites.append(app)
+        save_favorites()
+        update_favorites_section()
+
+def remove_from_favorites(app):
+    """Remove the selected app from the favorites list."""
+    if app in favorites:
+        favorites.remove(app)
+        save_favorites()
+        update_favorites_section()
+
+def update_favorites_section():
+    """Update the UI to display the favorites section."""
+    for widget in favorites_frame.winfo_children():
+        widget.destroy()
+
+    if not favorites:
+        tk.Label(favorites_frame, text="No favorites added.", bg=THEMES[current_theme]["bg"],
+                 fg=THEMES[current_theme]["fg"]).pack(pady=10)
+        return
+
+    for app in favorites:
+        app_frame = tk.Frame(favorites_frame, bg=THEMES[current_theme]["bg"])
+        app_frame.pack(fill="x", pady=2)
+
+        tk.Label(app_frame, text=app["name"], bg=THEMES[current_theme]["bg"],
+                 fg=THEMES[current_theme]["fg"]).pack(side=tk.LEFT, padx=10)
+        ttk.Button(app_frame, text="Run", command=lambda a=app: launch_app(a)).pack(side=tk.LEFT, padx=10)
+        ttk.Button(app_frame, text="Remove", command=lambda a=app: remove_from_favorites(a)).pack(side=tk.RIGHT, padx=10)
+
+# Recently Used Management
+def add_to_recent(app):
+    """Add the selected app to the recent list."""
+    if app not in recent:
+        recent.append(app)
+        if len(recent) > 10:  # Limit recent apps to 10
+            recent.pop(0)
+        save_recent()
+        update_recent_section()
+
+def update_recent_section():
+    """Update the UI to display the recent section."""
+    for widget in recent_frame.winfo_children():
+        widget.destroy()
+
+    if not recent:
+        tk.Label(recent_frame, text="No recent applications.", bg=THEMES[current_theme]["bg"],
+                 fg=THEMES[current_theme]["fg"]).pack(pady=10)
+        return
+
+    for app in recent:
+        app_frame = tk.Frame(recent_frame, bg=THEMES[current_theme]["bg"])
+        app_frame.pack(fill="x", pady=2)
+
+        tk.Label(app_frame, text=app["name"], bg=THEMES[current_theme]["bg"],
+                 fg=THEMES[current_theme]["fg"]).pack(side=tk.LEFT, padx=10)
+
+def create_buttons():
+    """Create or refresh buttons for applications."""
+    for widget in button_frame.winfo_children():
+        widget.destroy()
+
+    for category, apps in applications.items():
+        tk.Label(
+            button_frame,
+            text=category,
+            bg=THEMES[current_theme]["bg"],
+            fg=THEMES[current_theme]["accent"],
+            font=("Arial", 12, "bold")
+        ).grid(sticky="w", padx=10, pady=5)
+
+        for app in apps:
+            frame = tk.Frame(button_frame, bg=THEMES[current_theme]["bg"])
+            frame.grid(padx=10, pady=2, sticky="w")
+
+            icon = load_icon(app["icon"]) if app.get("icon") else None
+            if icon:
+                icon_label = tk.Label(frame, image=icon, bg=THEMES[current_theme]["bg"])
+                icon_label.image = icon
+                icon_label.pack(side=tk.LEFT, padx=5)
+
+            btn = ttk.Button(frame, text=app["name"], command=lambda a=app: launch_app(a))
+            btn.pack(side=tk.LEFT, padx=5, fill="x", expand=True)
+
+            ttk.Button(frame, text="★", command=lambda a=app: add_to_favorites(a)).pack(side=tk.RIGHT, padx=5)
+
+def launch_app(app):
+    """Launch the selected application."""
+    try:
+        subprocess.Popen(app["command"], shell=True)
+        add_to_recent(app)
+    except Exception as e:
+        messagebox.showerror("Error", f"Failed to launch {app['name']}: {e}")
+
+def toggle_theme():
+    """Toggle between light and dark themes."""
+    global current_theme
+    current_theme = "light" if current_theme == "dark" else "dark"
+    save_user_settings()
+    apply_theme()
+
+def apply_theme():
+    """Apply the current theme to all UI components."""
+    root.configure(bg=THEMES[current_theme]["bg"])
+    title_frame.configure(bg=THEMES[current_theme]["accent"])
+    title_label.configure(bg=THEMES[current_theme]["accent"], fg=THEMES[current_theme]["fg"])
+    top_frame.configure(bg=THEMES[current_theme]["bg"])
+    theme_button.config(
+        text=f"Switch to {('Light' if current_theme == 'dark' else 'Dark')} Mode",
+        bg=THEMES[current_theme]["accent"],
+        fg=THEMES[current_theme]["fg"]
+    )
+    scroll_canvas.configure(bg=THEMES[current_theme]["bg"])
+    button_frame.configure(bg=THEMES[current_theme]["bg"])
+    create_buttons()
+    update_favorites_section()
+    update_recent_section()
+
+# Main Application Setup
+root = tk.Tk()
+root.title("PC Hub")
+root.geometry("600x700")
+
+# Load settings and apps
+load_settings()
+load_apps()
+load_favorites()
+load_recent()
+load_users()
+
+# Title banner
+title_frame = tk.Frame(root, bg=THEMES[current_theme]["accent"])
+title_frame.pack(fill="x")
+title_label = tk.Label(
+    title_frame,
+    text="PC Hub",
+    font=("Arial", 18, "bold"),
+    bg=THEMES[current_theme]["accent"],
+    fg=THEMES[current_theme]["fg"],
+    pady=10
+)
+title_label.pack()
+
+# Top controls
+top_frame = tk.Frame(root, bg=THEMES[current_theme]["bg"])
+top_frame.pack(pady=10, fill="x")
+
+search_var = tk.StringVar()
+tk.Entry(top_frame, textvariable=search_var, font=("Arial", 12), width=25).pack(side=tk.LEFT, padx=5)
+
+ttk.Button(top_frame, text="Add App", command=lambda: None).pack(side=tk.LEFT, padx=5)
+ttk.Button(top_frame, text="Add from Active Apps", command=add_from_active_apps).pack(side=tk.LEFT, padx=5)
+theme_button = tk.Button(
+    top_frame,
+    text=f"Switch to {('Light' if current_theme == 'dark' else 'Dark')} Mode",
+    command=toggle_theme,
+    bg=THEMES[current_theme]["accent"],
+    fg=THEMES[current_theme]["fg"]
+)
+theme_button.pack(side=tk.LEFT, padx=5)
+
+# Scrollable buttons
+scroll_canvas = tk.Canvas(root, bg=THEMES[current_theme]["bg"], highlightthickness=0)
+scroll_frame = tk.Frame(scroll_canvas, bg=THEMES[current_theme]["bg"])
+scrollbar = ttk.Scrollbar(root, orient="vertical", command=scroll_canvas.yview)
+scroll_canvas.create_window((0, 0), window=scroll_frame, anchor="nw")
+scroll_canvas.configure(yscrollcommand=scrollbar.set)
+
+button_frame = scroll_frame
+scroll_frame.bind("<Configure>", lambda e: scroll_canvas.configure(scrollregion=scroll_canvas.bbox("all")))
+
+scroll_canvas.pack(side="left", fill="both", expand=True, padx=10)
+scrollbar.pack(side="right", fill="y")
+
+# Favorites and Recent Sections
+favorites_frame = tk.Frame(root, bg=THEMES[current_theme]["bg"])
+favorites_frame.pack(pady=10, fill="x")
+
+recent_frame = tk.Frame(root, bg=THEMES[current_theme]["bg"])
+recent_frame.pack(pady=10, fill="x")
+
+# Initialize
+apply_theme()
+root.mainloop()

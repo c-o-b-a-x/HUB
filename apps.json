@@ -1,0 +1,36 @@
+{
+    "Games": [
+        {
+            "name": "Fivem",
+            "command": "c:\\Users\\coby\\AppData\\Local\\FiveM\\FiveM.exe",
+            "icon": null
+        }
+    ],
+    "Music": [
+        {
+            "name": "Spotify",
+            "command": "C:/Users/coby/AppData/Roaming/Spotify/Spotify.exe",
+            "icon": null
+        }
+    ],
+    "Websites": [
+        {
+            "name": "youtube",
+            "command": "https://www.youtube.com/",
+            "icon": null
+        },
+        {
+            "name": "Amazon",
+            "command": "https://amazon.com/",
+            "icon": null
+        }
+    ],
+    "Communication": [
+        {
+            "name": "Discord",
+            "command": "C:\\Users\\coby\\AppData\\Local\\Discord\\Update.exe --processStart Discord.exe",
+            "icon": null
+        }
+    ]
+
+}
